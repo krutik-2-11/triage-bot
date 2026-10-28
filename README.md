@@ -225,7 +225,3 @@ The issues are public, but their text belongs to their authors. The `data/` fold
 
 - **Compare 3 small open models** (Gemma, Qwen and Nemotron families) on the same 20 questions: valid form on the first try, retries, speed and memory on a 16 GB Mac.
 - **Try an LLM judge step** that reads two posts and decides "same problem or not," scored against the 49 labeled pairs.
-
-## How I used Claude Code
-
-I designed the task, the test set and the scoring. I wrote the code with Claude, ran it, debugged it, and can explain every line. Claude also helped with setup, the CI workflow and review.
