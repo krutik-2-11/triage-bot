@@ -191,6 +191,7 @@ These are hypotheses. I have no real-user data, so I make no claims about time s
 - **Long posts are cut at 2,000 characters** before search, so the end of long log dumps is not seen.
 - **The threshold is an on-topic gate,** not a duplicate detector.
 - **No real-user data.** The business value is a hypothesis. In a pilot, I would measure time to first answer and how often people click a suggestion.
+- **Labels are only as useful as the category list.** Most issues landed in one broad `model_support` bucket, and some fit no category. This is a schema limit, not a model fault. See [results/audit_2.3.md](results/audit_2.3.md#schema-limits-found-during-the-audit).
 
 ## Tests and CI
 
