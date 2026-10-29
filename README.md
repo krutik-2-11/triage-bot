@@ -191,7 +191,11 @@ These are hypotheses. I have no real-user data, so I make no claims about time s
 - **Long posts are cut at 2,000 characters** before search, so the end of long log dumps is not seen.
 - **The threshold is an on-topic gate,** not a duplicate detector.
 - **No real-user data.** The business value is a hypothesis. In a pilot, I would measure time to first answer and how often people click a suggestion.
-- **Labels are only as useful as the category list.** Most issues landed in one broad `model_support` bucket, and some fit no category. This is a schema limit, not a model fault. See [results/audit_2.3.md](results/audit_2.3.md#schema-limits-found-during-the-audit).
+- **The label schema is too coarse for a one-product repo.** 8 of 10 random issues landed in
+  `area = model_support`, which mixes download failures, new-model requests and bad output.
+  There is no "not about Ollama" or "needs more info" option. I kept the schema fixed so the
+  comparison stays fair; a next version would split these buckets and re-run.
+  See [results/audit_2.3.md](results/audit_2.3.md).
 
 ## Tests and CI
 
@@ -222,7 +226,34 @@ data/                    downloaded issues (not committed)
 
 The issues are public, but their text belongs to their authors. The `data/` folder is in `.gitignore`, and this repo refers to issues by number only. `logs/` is ignored too, because it can hold the text of failed questions.
 
-## What's next
+## Model comparison (Phase 2)
 
-- **Compare 3 small open models** (Gemma, Qwen and Nemotron families) on the same 20 questions: valid form on the first try, retries, speed and memory on a 16 GB Mac.
-- **Try an LLM judge step** that reads two posts and decides "same problem or not," scored against the 49 labeled pairs.
+Same 49 duplicate questions, same prompt and schema, temperature 0, reasoning off,
+same embedder (nomic-embed-text) and threshold (0.60). One chat model in memory at a time.
+MacBook Air M5, 16 GB, context 4096. Full results: [results/models.md](results/models.md).
+
+| Model | Valid JSON 1st try | Retries | Median s / question | Memory at load* | Memory after 49 q* | `kind` correct** | `area` correct** |
+|---|---|---|---|---|---|---|---|
+| [qwen3.5:4b] | 49/49 | 0 | 2.9 | ≈3.9 GB | ≈10 GB | 8/9 | 9/10 |
+| [gemma tag] | 49/49 | 0 | 3.4 | ≈4.1 GB | [from models.md] | 9/9 | 10/10 |
+| [nemotron tag] | 49/49 | 0 | 3.1 | ≈3.0 GB | ≈11 GB | 5/9 | 9/10 |
+
+\* Change in macOS wired memory. `ollama ps` under-reported Gemma (261 MB), so I cross-checked all three.
+\*\* Random sample of 10 issues (seed 42), hand-labeled from titles only, one labeler.
+See [results/audit_2.3.md](results/audit_2.3.md).
+
+Retrieval was identical for all three (suggest 47/49, original in top 3 43/49), which confirms
+only the chat model changed.
+
+**Trade-offs I saw**
+- **Form-filling didn't separate them.** All three gave valid JSON on the first try, 49/49.
+  The retry loop never fired. With a JSON schema and temperature 0, structure is not the hard part.
+- **Labels did.** Nemotron used the least memory at load, but called 26 of 49 issues "question"
+  (vs 25–28 "bug" for the others) and got 5/9 `kind` right on the random sample. Product
+  would count demand by these labels, so switching models changes the report.
+- **Speed is a tie, memory over time is not.** Medians were within 0.5 s, and the order flipped
+  between a 20-question and a 49-question run. But the two MLX models grew from ~3–4 GB to
+  10–11 GB after 49 questions (cause unproven). For a bot that runs all day, memory after
+  many requests matters more than memory at load.
+
+No winner: the right pick depends on whether you care most about label quality or memory.
