@@ -261,3 +261,22 @@ data/                    downloaded issues and model summaries (not committed)
 ## Data and privacy
 
 The issues are public, but their text belongs to their authors. The `data/` folder is in `.gitignore`, and this repo refers to issues by number only. `logs/` is ignored too, because it can hold the text of failed questions.
+
+## Small open models or large closed models?
+
+I only tested small open models. I did not run a closed-model baseline, so this section is reasoning, not a measured result.
+
+| | Small open models, run locally | Large closed models (API) |
+|---|---|---|
+| **Data** | Stays on your machine | Sent to the provider |
+| **Cost** | Hardware only, close to zero per question | Pay per question, grows with volume |
+| **Quality** | Fine for structure, weaker on labels (this repo) | Likely better at judgment (not measured here) |
+| **Control** | Version is fixed, so eval scores stay valid | The model can change under you |
+| **Setup** | You manage memory, runtimes and updates | One API call |
+
+**When to use which**
+- **Small open, local:** private data (support tickets, internal forums), high volume, routine tasks like filling a form or ranking suggestions.
+- **Large closed:** public data, low volume, or steps where judgment matters, like deciding whether two posts share a root cause, or labels that product will count.
+- **Mix:** a small local model handles every question, and a larger model only reviews the hard or uncertain ones.
+
+The right way to decide is to run a large model on the same 49 pairs and compare. That is the next step, not a claim.
