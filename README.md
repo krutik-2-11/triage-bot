@@ -6,6 +6,8 @@ A small bot that reads a developer's question and either **suggests related exis
 
 Built with LangChain, LangGraph, Pydantic and Ollama.
 
+> This is a small experiment, not a production-grade bot. It is tested on 49 labeled pairs from one repo, on one laptop. Its value is the method and what broke, not the exact numbers.
+
 ## The problem
 
 Developer communities get the same question in many different words. That causes three problems:
@@ -112,6 +114,7 @@ Other commands:
 |---|---|
 | `uv run python build_index.py` | Scores search quality on the labeled duplicate pairs |
 | `uv run python calibrate_threshold.py` | Tests which similarity score separates duplicates from non-duplicates |
+| `uv run python compare_models.py` | Runs the 3-model comparison (pull the 3 chat models first, see below) |
 | `uv run pytest -v` | Runs the tests (no Ollama needed) |
 
 ## Results
@@ -144,6 +147,36 @@ On 49 pairs, a gap of 1 or 2 pairs is a tie. I picked `nomic-embed-text` because
 
 On 5 sample questions, all summaries were valid on the first try, at about 2 seconds per question after the first one. The 4 Ollama questions were routed to `suggest_related`, and an off-topic question about sourdough bread scored 0.44 and was flagged as new.
 
+## Model comparison (Phase 2)
+
+Same 49 duplicate questions, same prompt and schema, temperature 0, reasoning off, same embedder (`nomic-embed-text`) and threshold (0.60). One chat model in memory at a time, with an untimed warm-up call first. MacBook Air M5, 16 GB, context 4096. Full results: [results/models.md](results/models.md).
+
+| Model | Valid JSON 1st try | Retries | Median s / question | Memory at load* | Memory after 49 q* | `kind` correct** | `area` correct** |
+|---|---|---|---|---|---|---|---|
+| `qwen3.5:4b` | 49/49 | 0 | 2.9 | ≈3.9 GB | ≈10 GB | 8/9 | 9/10 |
+| `gemma4:e4b-it-qat` | 49/49 | 0 | 3.4 | ≈4.1 GB | not measured | 9/9 | 10/10 |
+| `nemotron-3-nano:4b` | 49/49 | 0 | 3.1 | ≈3.0 GB | ≈11 GB | 5/9 | 9/10 |
+
+\* Change in macOS wired memory. `ollama ps` under-reported Gemma (261 MB), so I cross-checked all three. Ollama ran Qwen and Nemotron on MLX and Gemma on llama.cpp, so speed and memory reflect the model plus its runtime.
+\** Random sample of 10 issues (seed 42), hand-labeled from titles only, one labeler; one `kind` was too ambiguous to judge. See [results/audit_2.3.md](results/audit_2.3.md).
+
+Retrieval was identical for all three (suggest 47/49, original in top 3 43/49), which confirms only the chat model changed.
+
+**Trade-offs I saw**
+
+- **Form-filling didn't separate them.** All three gave valid JSON on the first try, 49/49. The retry loop never fired. With a JSON schema and temperature 0, structure is not the hard part.
+- **Labels did.** Nemotron used the least memory at load, but called 26 of 49 issues "question" (vs 25–28 "bug" for the others) and got 5/9 `kind` right on the random sample. Product would count demand by these labels, so switching models changes the report.
+- **Speed is a tie, memory over time is not.** Medians were within 0.5 s, and the order flipped between a 20-question and a 49-question run. But the two MLX models grew from ~3–4 GB to 10–11 GB after 49 questions (cause unproven). For a bot that runs all day, memory after many requests matters more than memory at load.
+
+No winner: the right pick depends on whether you care most about label quality or memory.
+
+To run it yourself:
+
+```bash
+ollama pull gemma4:e4b-it-qat && ollama pull nemotron-3-nano:4b
+uv run python compare_models.py
+```
+
 ## What I noticed
 
 - **Ranking works, absolute scores don't.** I expected one similarity score to separate duplicates from non-duplicates. It doesn't. Normal issues scored higher with their closest neighbor (median 0.783) than true duplicates did with their original (median 0.759). In a repo about one product, every issue has a close "same topic" neighbor. So the 0.60 threshold is an **on-topic gate**, not a duplicate detector.
@@ -153,6 +186,7 @@ On 5 sample questions, all summaries were valid on the first try, at about 2 sec
 - **Very short posts are hard.** A 4-word title gives the search little to work with.
 - **Demand signal, live.** "Parallel requests," "more than one instance" and "Concurrency" were three wordings of one need.
 - **Small-model labels are fuzzy.** The sourdough question got `area = cli` because the form has no "not about Ollama" option. A question about images got `gpu` instead of `model_support`.
+- **Valid output isn't correct output.** In Phase 2, every model filled the form perfectly, but they disagreed on `kind` for 29 of 49 questions.
 
 More in [NOTES.md](NOTES.md).
 
@@ -164,12 +198,12 @@ More in [NOTES.md](NOTES.md).
 |---|---|---|
 | Recall@5 | Does the right thread make the suggestion list? | 0.898 (44/49) |
 | Recall@1 and MRR | How high does it rank? | 0.796 and 0.843 |
-| Valid form on first try | Can the model fill in the form reliably? | 5/5 in the demo |
-| Retries needed | How often does the form break? | 0 in the demo |
-| Seconds per question | Is it fast enough for a chat channel? | about 2 to 5 s |
+| Valid form on first try | Can the model fill in the form reliably? | 49/49 for all 3 models |
+| Retries needed | How often does the form break? | 0 for all 3 models |
+| Seconds per question | Is it fast enough for a chat channel? | median 2.9 to 3.4 s |
+| Memory over time | Will it fit a laptop all day? | grew to 10–11 GB after 49 questions (2 models) |
+| Label accuracy (`kind`) | Can product trust the counts? | 5/9 to 9/9 on a random sample |
 | Off-topic flagging | Does it stay quiet on unrelated posts? | sourdough scored 0.44 and was flagged |
-
-Phase 2 adds memory use and route accuracy for each of the 3 models.
 
 **What I would measure in a pilot (not measured yet):**
 
@@ -187,15 +221,12 @@ These are hypotheses. I have no real-user data, so I make no claims about time s
 
 - **Small test set:** 49 labeled pairs from one repo. These numbers don't generalize to other communities.
 - **Labels are incomplete:** some distractors are probably unlabeled duplicates, so some "misses" may be right.
-- **The audit used titles only,** not full bodies.
+- **The audits used titles only,** not full bodies, and one person did the labeling.
 - **Long posts are cut at 2,000 characters** before search, so the end of long log dumps is not seen.
 - **The threshold is an on-topic gate,** not a duplicate detector.
+- **One machine, one run per model.** Speed gaps under a second are noise. Memory growth was seen but its cause is unproven.
 - **No real-user data.** The business value is a hypothesis. In a pilot, I would measure time to first answer and how often people click a suggestion.
-- **The label schema is too coarse for a one-product repo.** 8 of 10 random issues landed in
-  `area = model_support`, which mixes download failures, new-model requests and bad output.
-  There is no "not about Ollama" or "needs more info" option. I kept the schema fixed so the
-  comparison stays fair; a next version would split these buckets and re-run.
-  See [results/audit_2.3.md](results/audit_2.3.md).
+- **The label schema is too coarse for a one-product repo.** 8 of 10 random issues landed in `area = model_support`, which mixes download failures, new-model requests and bad output. There is no "not about Ollama" or "needs more info" option. I kept the schema fixed so the comparison stays fair; a next version would split these buckets and re-run. See [results/audit_2.3.md](results/audit_2.3.md).
 
 ## Tests and CI
 
@@ -208,6 +239,10 @@ The tests check my own logic, not the model's quality. They use a fake model and
 
 Model quality is measured separately, with the answer key above. GitHub Actions runs `uv run pytest` on every push.
 
+## How I used Claude
+
+I designed the evaluation: the answer key, leak checks, audits and the comparison rules. I wrote the code with Claude as a pair programmer, then ran, debugged and checked every step myself. NOTES.md records what I expected and what I got wrong.
+
 ## Project layout
 
 ```
@@ -216,44 +251,13 @@ build_index.py           embed issues and score search quality
 summarize_chain.py       LangChain: prompt + model + Pydantic form
 triage_graph.py          LangGraph: retry, search, suggest or flag
 calibrate_threshold.py   test similarity thresholds
+compare_models.py        run the same 49 questions through 3 chat models
 tests/test_triage.py     tests with a fake model and fake search
-results/                 audit results (issue numbers only)
+results/                 audits, model notes and compare.csv (issue numbers only)
 NOTES.md                 what I expected and what I got wrong
-data/                    downloaded issues (not committed)
+data/                    downloaded issues and model summaries (not committed)
 ```
 
 ## Data and privacy
 
 The issues are public, but their text belongs to their authors. The `data/` folder is in `.gitignore`, and this repo refers to issues by number only. `logs/` is ignored too, because it can hold the text of failed questions.
-
-## Model comparison (Phase 2)
-
-Same 49 duplicate questions, same prompt and schema, temperature 0, reasoning off,
-same embedder (nomic-embed-text) and threshold (0.60). One chat model in memory at a time.
-MacBook Air M5, 16 GB, context 4096. Full results: [results/models.md](results/models.md).
-
-| Model | Valid JSON 1st try | Retries | Median s / question | Memory at load* | Memory after 49 q* | `kind` correct** | `area` correct** |
-|---|---|---|---|---|---|---|---|
-| [qwen3.5:4b] | 49/49 | 0 | 2.9 | ≈3.9 GB | ≈10 GB | 8/9 | 9/10 |
-| [gemma tag] | 49/49 | 0 | 3.4 | ≈4.1 GB | [from models.md] | 9/9 | 10/10 |
-| [nemotron tag] | 49/49 | 0 | 3.1 | ≈3.0 GB | ≈11 GB | 5/9 | 9/10 |
-
-\* Change in macOS wired memory. `ollama ps` under-reported Gemma (261 MB), so I cross-checked all three.
-\*\* Random sample of 10 issues (seed 42), hand-labeled from titles only, one labeler.
-See [results/audit_2.3.md](results/audit_2.3.md).
-
-Retrieval was identical for all three (suggest 47/49, original in top 3 43/49), which confirms
-only the chat model changed.
-
-**Trade-offs I saw**
-- **Form-filling didn't separate them.** All three gave valid JSON on the first try, 49/49.
-  The retry loop never fired. With a JSON schema and temperature 0, structure is not the hard part.
-- **Labels did.** Nemotron used the least memory at load, but called 26 of 49 issues "question"
-  (vs 25–28 "bug" for the others) and got 5/9 `kind` right on the random sample. Product
-  would count demand by these labels, so switching models changes the report.
-- **Speed is a tie, memory over time is not.** Medians were within 0.5 s, and the order flipped
-  between a 20-question and a 49-question run. But the two MLX models grew from ~3–4 GB to
-  10–11 GB after 49 questions (cause unproven). For a bot that runs all day, memory after
-  many requests matters more than memory at load.
-
-No winner: the right pick depends on whether you care most about label quality or memory.
